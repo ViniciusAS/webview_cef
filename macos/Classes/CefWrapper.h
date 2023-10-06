@@ -30,6 +30,8 @@ extern EventsStreamHandler *evHandler;
 
 + (void) cursorClickDown: (int)x y:(int)y;
 
++ (void) cursorMove: (int)x y:(int)y dragging:(bool)dragging;
+
 + (void) sendScrollEvent:(int)x y:(int)y deltaX:(int)deltaX deltaY:(int)deltaY;
 
 + (void) sizeChanged: (float)dpi width:(int)width height:(int)height;
@@ -41,6 +43,24 @@ extern EventsStreamHandler *evHandler;
 + (void) goBack;
 
 + (void) reload;
+
++ (void) openDevTools;
+
++ (void) setMethodChannel: (FlutterMethodChannel*)channel;
+
++ (void) setCookie: (NSString *)domain key:(NSString *) key value:(NSString *)value;
+
++ (void) deleteCookie: (NSString *)domain key:(NSString *) key;
+
++ (void) visitAllCookies;
+
++ (void) visitUrlCookies: (NSString *)domain isHttpOnly:(bool)isHttpOnly;
+
++ (void) setJavaScriptChannels: (NSArray *)channels;
+
++ (void) sendJavaScriptChannelCallBack: (bool)error  result:(NSString *)result callbackId:(NSString *)callbackId frameId:(NSString *)frameId;
+
++ (void) executeJavaScript: (NSString *)code;
 
 @end
 

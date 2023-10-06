@@ -12,10 +12,8 @@
 
 #include <memory>
 #include <thread>
-#include<iostream>
+#include <iostream>
 #include <mutex>
-
-#include "simple_app.h"
 
 namespace webview_cef {
 	bool init = false;
@@ -26,18 +24,23 @@ namespace webview_cef {
 	std::unique_ptr<uint8_t> backing_pixel_buffer;
 	std::mutex buffer_mutex_;
 	std::unique_ptr<flutter::TextureVariant> m_texture = std::make_unique<flutter::TextureVariant>(flutter::PixelBufferTexture([](size_t width, size_t height) -> const FlutterDesktopPixelBuffer* {
+		buffer_mutex_.lock();
 		auto buffer = pixel_buffer.get();
 		// Only lock the mutex if the buffer is not null
 		// (to ensure the release callback gets called)
-		if (buffer) {
-			// Gets unlocked in the FlutterDesktopPixelBuffer's release callback.
-			buffer_mutex_.lock();
+		if (!buffer) {
+			buffer_mutex_.unlock();
 		}
 		return buffer;
 		}));
-	CefRefPtr<SimpleHandler> handler(new SimpleHandler(false));
-	CefRefPtr<SimpleApp> app(new SimpleApp(handler));
+	CefRefPtr<WebviewHandler> handler(new WebviewHandler());
+	CefRefPtr<WebviewApp> app(new WebviewApp(handler));
 	CefMainArgs mainArgs;
+
+	std::unique_ptr<
+		flutter::MethodChannel<flutter::EncodableValue>,
+		std::default_delete<flutter::MethodChannel<flutter::EncodableValue>>>
+		channel = nullptr;
 
 
 	void SwapBufferFromBgraToRgba(void* _dest, const void* _src, int width, int height) {
@@ -86,18 +89,53 @@ namespace webview_cef {
 			texture_registrar->MarkTextureFrameAvailable(texture_id);
 		};
 
+		handler.get()->onUrlChangedCb = [](std::string url) {
+			channel->InvokeMethod("urlChanged", std::make_unique<flutter::EncodableValue>(url));
+		};
+
+		handler.get()->onTitleChangedCb = [](std::string title) {
+			channel->InvokeMethod("titleChanged", std::make_unique<flutter::EncodableValue>(title));
+		};
+
+		handler.get()->onAllCookieVisitedCb = [](std::map<std::string, std::map<std::string, std::string>> cookies) {
+			flutter::EncodableMap retMap;
+			for (auto& cookie : cookies)
+			{
+				flutter::EncodableMap tempMap;
+				for (auto& c : cookie.second)
+				{
+					tempMap[flutter::EncodableValue(c.first)] = flutter::EncodableValue(c.second);
+				}
+				retMap[flutter::EncodableValue(cookie.first)] = flutter::EncodableValue(tempMap);
+			}
+			channel->InvokeMethod("allCookiesVisited", std::make_unique<flutter::EncodableValue>(retMap));
+		};
+
+		handler.get()->onUrlCookieVisitedCb = [](std::map<std::string, std::map<std::string, std::string>> cookies) {
+			flutter::EncodableMap retMap;
+			for (auto& cookie : cookies)
+			{
+				flutter::EncodableMap tempMap;
+				for (auto& c : cookie.second)
+				{
+					tempMap[flutter::EncodableValue(c.first)] = flutter::EncodableValue(c.second);
+				}
+				retMap[flutter::EncodableValue(cookie.first)] = flutter::EncodableValue(tempMap);
+			}
+			channel->InvokeMethod("urlCookiesVisited", std::make_unique<flutter::EncodableValue>(retMap));
+		};
+
+		handler.get()->onJavaScriptChannelMessage = [](std::string channelName, std::string message, std::string callbackId, std::string frameId) {
+			flutter::EncodableMap retMap;
+			retMap[flutter::EncodableValue("channel")] = flutter::EncodableValue(channelName);
+			retMap[flutter::EncodableValue("message")] = flutter::EncodableValue(message);
+			retMap[flutter::EncodableValue("callbackId")] = flutter::EncodableValue(callbackId);
+			retMap[flutter::EncodableValue("frameId")] = flutter::EncodableValue(frameId);
+			channel->InvokeMethod("javascriptChannelMessage", std::make_unique<flutter::EncodableValue>(retMap));
+		};
+
 		CefSettings cefs;
 		cefs.windowless_rendering_enabled = true;
-		/*app.get()->handler->onPaintCallback = [tid](const void* buffer, int width, int height) {
-			if (!pixel_buffer.get()) {
-				pixel_buffer.reset(new FlutterDesktopPixelBuffer());
-				pixel_buffer->buffer = (uint8_t*)malloc(width * height * 4);
-				pixel_buffer->width = width;
-				pixel_buffer->height = height;
-			}
-			SwapBufferFromBgraToRgba((void*)pixel_buffer->buffer, buffer, width, height);
-			texture_registrar->MarkTextureFrameAvailable(tid);
-		};*/
 		CefInitialize(mainArgs, cefs, app.get(), nullptr);
 		CefRunMessageLoop();
 		CefShutdown();
@@ -135,7 +173,7 @@ namespace webview_cef {
 	void WebviewCefPlugin::RegisterWithRegistrar(
 		flutter::PluginRegistrarWindows* registrar) {
 		texture_registrar = registrar->texture_registrar();
-		auto channel =
+		channel =
 			std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
 				registrar->messenger(), "webview_cef",
 				&flutter::StandardMethodCodec::GetInstance());
@@ -195,6 +233,16 @@ namespace webview_cef {
 			handler.get()->cursorClick(point->first, point->second, true);
 			result->Success();
 		}
+		else if (method_call.method_name().compare("cursorMove") == 0) {
+			const auto point = GetPointFromArgs(method_call.arguments());
+			handler.get()->cursorMove(point->first, point->second, false);
+			result->Success();
+		}
+		else if (method_call.method_name().compare("cursorDragging") == 0) {
+			const auto point = GetPointFromArgs(method_call.arguments());
+			handler.get()->cursorMove(point->first, point->second, true);
+			result->Success();
+		}
 		else if (method_call.method_name().compare("setScrollDelta") == 0) {
 			const flutter::EncodableList* list =
 				std::get_if<flutter::EncodableList>(method_call.arguments());
@@ -216,6 +264,67 @@ namespace webview_cef {
 		else if (method_call.method_name().compare("reload") == 0) {
 			handler.get()->reload();
 			result->Success();
+		}
+		else if (method_call.method_name().compare("openDevTools") == 0) {
+			handler.get()->openDevTools();
+			result->Success();
+		}
+		else if(method_call.method_name().compare("setCookie") == 0){
+			const flutter::EncodableList* list =
+				std::get_if<flutter::EncodableList>(method_call.arguments());
+			const auto domain = *std::get_if<std::string>(&(*list)[0]);
+			const auto key = *std::get_if<std::string>(&(*list)[1]);
+			const auto value = *std::get_if<std::string>(&(*list)[2]);
+			handler.get()->setCookie(domain, key, value);
+			result->Success();
+		}
+		else if (method_call.method_name().compare("deleteCookie") == 0) {
+			const flutter::EncodableList* list =
+				std::get_if<flutter::EncodableList>(method_call.arguments());
+			const auto domain = *std::get_if<std::string>(&(*list)[0]);
+			const auto key = *std::get_if<std::string>(&(*list)[1]);
+			handler.get()->deleteCookie(domain, key);
+			result->Success();
+		}
+		else if (method_call.method_name().compare("visitAllCookies") == 0) {
+			handler.get()->visitAllCookies();
+			result->Success();
+		}
+		else if (method_call.method_name().compare("visitUrlCookies") == 0) {
+			const flutter::EncodableList* list =
+				std::get_if<flutter::EncodableList>(method_call.arguments());
+			const auto domain = *std::get_if<std::string>(&(*list)[0]);
+			const auto isHttpOnly = *std::get_if<bool>(&(*list)[1]);
+			handler.get()->visitUrlCookies(domain, isHttpOnly);
+			result->Success();
+		}
+		else if(method_call.method_name().compare("setJavaScriptChannels") == 0){
+			const flutter::EncodableList* list =
+				std::get_if<flutter::EncodableList>(method_call.arguments());
+			const auto jsChannels = *std::get_if<std::vector<flutter::EncodableValue>>(&(*list)[0]);
+			std::vector<std::string> channels;
+			for (auto& jsChannel : jsChannels) {
+				channels.push_back(*std::get_if<std::string>(&(jsChannel)));
+			}
+			handler.get()->setJavaScriptChannels(channels);
+			result->Success();
+		}
+		else if (method_call.method_name().compare("sendJavaScriptChannelCallBack") == 0) {
+			const flutter::EncodableList* list =
+				std::get_if<flutter::EncodableList>(method_call.arguments());
+			const auto error = *std::get_if<bool>(&(*list)[0]);
+			const auto ret = *std::get_if<std::string>(&(*list)[1]);
+			const auto callbackId = *std::get_if<std::string>(&(*list)[2]);
+			const auto frameId = *std::get_if<std::string>(&(*list)[3]);
+			handler.get()->sendJavaScriptChannelCallBack(error, ret,callbackId,frameId);
+			result->Success();
+		}
+		else if(method_call.method_name().compare("executeJavaScript") == 0){
+			const flutter::EncodableList* list =
+				std::get_if<flutter::EncodableList>(method_call.arguments());
+			const auto code = *std::get_if<std::string>(&(*list)[0]);
+			handler.get()->executeJavaScript(code);
+			result->Success();	
 		}
 		else {
 			result->NotImplemented();

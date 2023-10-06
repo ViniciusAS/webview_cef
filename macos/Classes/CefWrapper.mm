@@ -9,13 +9,15 @@
 #import <Foundation/Foundation.h>
 #import "include/wrapper/cef_library_loader.h"
 #import "include/cef_app.h"
-#import "../../common/simple_app.h"
-#import "../../common/simple_handler.h"
+#import "../../common/webview_app.h"
+#import "../../common/webview_handler.h"
+#import "../../common/webview_cookieVisitor.h"
+#import "../../common/webview_js_handler.h"
 
 #include <thread>
 
-CefRefPtr<SimpleHandler> handler(new SimpleHandler(true));
-CefRefPtr<SimpleApp> app(new SimpleApp(handler));
+CefRefPtr<WebviewHandler> handler(new WebviewHandler());
+CefRefPtr<WebviewApp> app(new WebviewApp(handler));
 CefMainArgs mainArgs;
 
 NSObject<FlutterTextureRegistry>* tr;
@@ -29,6 +31,8 @@ static CVPixelBufferRef buf_temp;
 dispatch_semaphore_t lock = dispatch_semaphore_create(1);
 
 int64_t textureId;
+
+FlutterMethodChannel* f_channel;
 
 @implementation CefWrapper
 
@@ -59,9 +63,10 @@ int64_t textureId;
     };
     handler.get()->onPaintCallback = [](const void* buffer, int32_t width, int32_t height) {
         NSDictionary* dic = @{
+            (__bridge NSString*)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA),
+            (__bridge NSString*)kCVPixelBufferIOSurfacePropertiesKey : @{},
+            (__bridge NSString*)kCVPixelBufferOpenGLCompatibilityKey : @YES,
             (__bridge NSString*)kCVPixelBufferMetalCompatibilityKey : @YES,
-            (__bridge NSString*)kCVPixelBufferCGBitmapContextCompatibilityKey : @YES,
-            (__bridge NSString*)kCVPixelBufferCGImageCompatibilityKey : @YES,
         };
         
         static CVPixelBufferRef buf = NULL;
@@ -92,6 +97,61 @@ int64_t textureId;
         dispatch_semaphore_signal(lock);
         [tr textureFrameAvailable:textureId];
     };
+    
+    //url change cb
+    handler.get()->onUrlChangedCb = [](std::string url) {
+        [f_channel invokeMethod:@"urlChanged" arguments:[NSString stringWithCString:url.c_str() encoding:NSUTF8StringEncoding]];
+    };
+    //title change cb
+    handler.get()->onTitleChangedCb = [](std::string title) {
+        [f_channel invokeMethod:@"titleChanged" arguments:[NSString stringWithCString:title.c_str() encoding:NSUTF8StringEncoding]];
+    };
+    //allcookie visited cb
+    handler.get()->onAllCookieVisitedCb = [](std::map<std::string, std::map<std::string, std::string>> cookies) {
+        NSMutableDictionary * dict = [NSMutableDictionary dictionary];
+        for(auto &cookie : cookies)
+        {
+            NSString * domain = [NSString stringWithCString:cookie.first.c_str() encoding:NSUTF8StringEncoding];
+            NSMutableDictionary * tempdict = [NSMutableDictionary dictionary];
+            for(auto &c : cookie.second)
+            {
+                NSString * key = [NSString stringWithCString:c.first.c_str() encoding:NSUTF8StringEncoding];
+                NSString * val = [NSString stringWithCString:c.second.c_str() encoding:NSUTF8StringEncoding];
+                tempdict[key] = val;
+            }
+            dict[domain] = tempdict;
+        }
+        [f_channel invokeMethod:@"allCookiesVisited" arguments:dict];
+    };
+    
+    //urlcookie visited cb
+    handler.get()->onUrlCookieVisitedCb = [](std::map<std::string, std::map<std::string, std::string>> cookies) {
+        NSMutableDictionary * dict = [NSMutableDictionary dictionary];
+        for(auto &cookie : cookies)
+        {
+            NSString * domain = [NSString stringWithCString:cookie.first.c_str() encoding:NSUTF8StringEncoding];
+            NSMutableDictionary * tempdict = [NSMutableDictionary dictionary];
+            for(auto &c : cookie.second)
+            {
+                NSString * key = [NSString stringWithCString:c.first.c_str() encoding:NSUTF8StringEncoding];
+                NSString * val = [NSString stringWithCString:c.second.c_str() encoding:NSUTF8StringEncoding];
+                tempdict[key] = val;
+            }
+            dict[domain] = tempdict;
+        }
+        [f_channel invokeMethod:@"urlCookiesVisited" arguments:dict];
+    };
+
+    //JavaScriptChannel called
+ 	handler.get()->onJavaScriptChannelMessage = [](std::string channelName, std::string message, std::string callbackId, std::string frameId) {
+        NSMutableDictionary * dict = [NSMutableDictionary dictionary];
+        dict[@"channel"] = [NSString stringWithCString:channelName.c_str() encoding:NSUTF8StringEncoding];
+        dict[@"message"]  = [NSString stringWithCString:message.c_str() encoding:NSUTF8StringEncoding];
+        dict[@"callbackId"]  = [NSString stringWithCString:callbackId.c_str() encoding:NSUTF8StringEncoding];
+        dict[@"frameId"]  = [NSString stringWithCString:frameId.c_str() encoding:NSUTF8StringEncoding];
+        [f_channel invokeMethod:@"javascriptChannelMessage" arguments:dict];
+	};   
+
     CefSettings settings;
     settings.windowless_rendering_enabled = true;
     settings.external_message_pump = true;
@@ -206,6 +266,10 @@ int64_t textureId;
     handler.get()->cursorClick(x, y, false);
 }
 
++ (void)cursorMove:(int)x y:(int)y dragging:(bool)dragging {
+    handler.get()->cursorMove(x, y, dragging);
+}
+
 + (void)sizeChanged:(float)dpi width:(int)width height:(int)height {
     handler.get()->changeSize(dpi, width, height);
 }
@@ -226,6 +290,10 @@ int64_t textureId;
     handler.get()->reload();
 }
 
++ (void)openDevTools {
+    handler.get()->openDevTools();
+}
+
 - (CVPixelBufferRef _Nullable)copyPixelBuffer {
     dispatch_semaphore_wait(lock, DISPATCH_TIME_FOREVER);
     buf_temp = buf_cache;
@@ -234,6 +302,44 @@ int64_t textureId;
     return buf_temp;
 }
 
++ (void)setMethodChannel: (FlutterMethodChannel*)channel {
+    f_channel = channel;
+}
+
++ (void)setCookie: (NSString *)domain key:(NSString *) key value:(NSString *)value {
+    handler.get()->setCookie(std::string([domain cStringUsingEncoding:NSUTF8StringEncoding]), std::string([key cStringUsingEncoding:NSUTF8StringEncoding]), std::string([value cStringUsingEncoding:NSUTF8StringEncoding]));
+}
+
++ (void)deleteCookie: (NSString *)domain key:(NSString *) key {
+    handler.get()->deleteCookie(std::string([domain cStringUsingEncoding:NSUTF8StringEncoding]), std::string([key cStringUsingEncoding:NSUTF8StringEncoding]));
+}
+
++ (void)visitAllCookies {
+    handler.get()->visitAllCookies();
+}
+
++ (void)visitUrlCookies: (NSString *)domain isHttpOnly:(bool)isHttpOnly {
+    handler.get()->visitUrlCookies(std::string([domain cStringUsingEncoding:NSUTF8StringEncoding]), isHttpOnly);
+}
+
++ (void) setJavaScriptChannels: (NSArray *)channels {
+    std::vector<std::string> stdChannels;
+    NSEnumerator * enumerator = [channels objectEnumerator];
+    NSString * value;
+    while (value = [enumerator nextObject]) {
+        stdChannels.push_back(std::string([value cStringUsingEncoding:NSUTF8StringEncoding]));
+    }
+    handler.get()->setJavaScriptChannels(stdChannels);
+}
+
++ (void) sendJavaScriptChannelCallBack: (bool)error  result:(NSString *)result callbackId:(NSString *)callbackId frameId:(NSString *)frameId {
+    handler.get()->sendJavaScriptChannelCallBack(error, std::string([result cStringUsingEncoding:NSUTF8StringEncoding]), 
+        std::string([callbackId cStringUsingEncoding:NSUTF8StringEncoding]), std::string([frameId cStringUsingEncoding:NSUTF8StringEncoding]));
+}
+
++ (void) executeJavaScript: (NSString *)code {
+    handler.get()->executeJavaScript(std::string([code cStringUsingEncoding:NSUTF8StringEncoding]));
+}
 @end
 
 

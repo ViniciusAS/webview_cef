@@ -10,7 +10,9 @@
 #include <functional>
 #include <list>
 
-class SimpleHandler : public CefClient,
+#include "webview_cookieVisitor.h"
+
+class WebviewHandler : public CefClient,
 public CefDisplayHandler,
 public CefLifeSpanHandler,
 public CefLoadHandler,
@@ -18,12 +20,17 @@ public CefRenderHandler{
 public:
     std::function<void(const void*, int32_t width, int32_t height)> onPaintCallback;
     std::function<void(int x, int y, int w, int h)> imePositionCallback;
+    std::function<void(std::string url)> onUrlChangedCb;
+    std::function<void(std::string title)> onTitleChangedCb;
+    std::function<void(std::map<std::string, std::map<std::string, std::string>>)> onAllCookieVisitedCb;
+    std::function<void(std::map<std::string, std::map<std::string, std::string>>)> onUrlCookieVisitedCb;
+    std::function<void(std::string channelName, std::string message, std::string js_callback_id, std::string frameId)> onJavaScriptChannelMessage;
     
-    explicit SimpleHandler(bool use_views);
-    ~SimpleHandler();
+    explicit WebviewHandler();
+    ~WebviewHandler();
     
     // Provide access to the single global instance of this object.
-    static SimpleHandler* GetInstance();
+    static WebviewHandler* GetInstance();
     
     // CefClient methods:
     virtual CefRefPtr<CefDisplayHandler> GetDisplayHandler() override {
@@ -33,28 +40,38 @@ public:
         return this;
     }
     virtual CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
-    virtual CefRefPtr<CefRenderHandler> GetRenderHandler() override { return this; } 
+    virtual CefRefPtr<CefRenderHandler> GetRenderHandler() override { return this; }
+
+	bool OnProcessMessageReceived(
+        CefRefPtr<CefBrowser> browser,
+		CefRefPtr<CefFrame> frame,
+		CefProcessId source_process,
+		CefRefPtr<CefProcessMessage> message) override;
+
     
     // CefDisplayHandler methods:
     virtual void OnTitleChange(CefRefPtr<CefBrowser> browser,
                                const CefString& title) override;
+    virtual void OnAddressChange(CefRefPtr<CefBrowser> browser,
+                                 CefRefPtr<CefFrame> frame,
+                                 const CefString& url) override;
     
     // CefLifeSpanHandler methods:
     virtual void OnAfterCreated(CefRefPtr<CefBrowser> browser) override;
     virtual bool DoClose(CefRefPtr<CefBrowser> browser) override;
     virtual void OnBeforeClose(CefRefPtr<CefBrowser> browser) override;
     virtual bool OnBeforePopup(CefRefPtr<CefBrowser> browser,
-        CefRefPtr<CefFrame> frame,
-        const CefString& target_url,
-        const CefString& target_frame_name,
-        WindowOpenDisposition target_disposition,
-        bool user_gesture,
-        const CefPopupFeatures& popupFeatures,
-        CefWindowInfo& windowInfo,
-        CefRefPtr<CefClient>& client,
-        CefBrowserSettings& settings,
-        CefRefPtr<CefDictionaryValue>& extra_info,
-        bool* no_javascript_access) override;
+                               CefRefPtr<CefFrame> frame,
+                               const CefString& target_url,
+                               const CefString& target_frame_name,
+                               WindowOpenDisposition target_disposition,
+                               bool user_gesture,
+                               const CefPopupFeatures& popupFeatures,
+                               CefWindowInfo& windowInfo,
+                               CefRefPtr<CefClient>& client,
+                               CefBrowserSettings& settings,
+                               CefRefPtr<CefDictionaryValue>& extra_info,
+                               bool* no_javascript_access) override;
     
     // CefLoadHandler methods:
     virtual void OnLoadError(CefRefPtr<CefBrowser> browser,
@@ -67,6 +84,7 @@ public:
     virtual void GetViewRect(CefRefPtr<CefBrowser> browser, CefRect& rect) override;
     virtual void OnPaint(CefRefPtr<CefBrowser> browser, PaintElementType type, const RectList& dirtyRects, const void* buffer, int width, int height) override;
     virtual bool GetScreenInfo(CefRefPtr<CefBrowser> browser, CefScreenInfo& screen_info) override;
+    
     virtual void OnImeCompositionRangeChanged(
           CefRefPtr<CefBrowser> browser,
           const CefRange& selection_range,
@@ -74,11 +92,15 @@ public:
     virtual void OnTextSelectionChanged(CefRefPtr<CefBrowser> browser,
                                         const CefString& selected_text,
                                         const CefRange& selected_range) override;
+                                        
+    virtual bool StartDragging(CefRefPtr<CefBrowser> browser,
+                               CefRefPtr<CefDragData> drag_data,
+                               DragOperationsMask allowed_ops,
+                               int x,
+                               int y) override;
     
     // Request that all existing browser windows close.
     void CloseAllBrowsers(bool force_close);
-    
-    bool IsClosing() const { return is_closing_; }
     
     // Returns true if the Chrome runtime is enabled.
     static bool IsChromeRuntimeEnabled();
@@ -86,32 +108,39 @@ public:
     void sendScrollEvent(int x, int y, int deltaX, int deltaY);
     void changeSize(float a_dpi, int width, int height);
     void cursorClick(int x, int y, bool up);
+    void cursorMove(int x, int y, bool dragging);
     void sendKeyEvent(CefKeyEvent ev);
     void loadUrl(std::string url);
     void goForward();
     void goBack();
     void reload();
+    void openDevTools();
+    
+    void setCookie(const std::string& domain, const std::string& key, const std::string& value);
+    void deleteCookie(const std::string& domain, const std::string& key);
+    bool visitAllCookies();
+    bool visitUrlCookies(const std::string& domain, const bool& isHttpOnly);
+
+    bool setJavaScriptChannels(const std::vector<std::string> channels);
+    bool sendJavaScriptChannelCallBack(const bool error, const std::string result, const std::string callbackId, const std::string frameId);
+    bool executeJavaScript(const std::string code);
     
 private:
+    bool getCookieVisitor();
+
     uint32_t width = 1;
     uint32_t height = 1;
     float dpi = 1.0;
-    
-    // Platform-specific implementation.
-    void PlatformTitleChange(CefRefPtr<CefBrowser> browser,
-                             const CefString& title);
-    
-    // True if the application is using the Views framework.
-    const bool use_views_;
+    bool is_dragging = false;
     
     // List of existing browser windows. Only accessed on the CEF UI thread.
     typedef std::list<CefRefPtr<CefBrowser>> BrowserList;
     BrowserList browser_list_;
     
-    bool is_closing_;
-    
     // Include the default reference counting implementation.
-    IMPLEMENT_REFCOUNTING(SimpleHandler);
+    IMPLEMENT_REFCOUNTING(WebviewHandler);
+
+    CefRefPtr<WebviewCookieVisitor> m_CookieVisitor;
 };
 
 #endif  // CEF_TESTS_CEFSIMPLE_SIMPLE_HANDLER_H_

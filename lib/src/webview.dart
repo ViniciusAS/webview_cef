@@ -7,6 +7,9 @@ import 'package:flutter/services.dart';
 
 import 'text_input_handler.dart';
 
+import 'webview_events_listener.dart';
+import 'webview_javascript.dart';
+
 const MethodChannel _pluginChannel = MethodChannel("webview_cef");
 const EventChannel _channel = EventChannel('webview_cef_events');
 
@@ -14,6 +17,10 @@ class WebViewController extends ValueNotifier<bool> {
   late Completer<void> _creatingCompleter;
   int _textureId = 0;
   bool _isDisposed = false;
+  WebviewEventsListener? _listener;
+
+  final Map<String, JavascriptChannel> _javascriptChannels =
+      <String, JavascriptChannel>{};
 
   Future<void> get ready => _creatingCompleter.future;
 
@@ -27,7 +34,7 @@ class WebViewController extends ValueNotifier<bool> {
     _creatingCompleter = Completer<void>();
     try {
       _textureId = await _pluginChannel.invokeMethod<int>('init') ?? 0;
-
+      _pluginChannel.setMethodCallHandler(_methodCallhandler);
       value = true;
       _creatingCompleter.complete();
     } on PlatformException catch (e) {
@@ -36,11 +43,42 @@ class WebViewController extends ValueNotifier<bool> {
     return _creatingCompleter.future;
   }
 
+  Future<void> _methodCallhandler(MethodCall call) async {
+    if (_listener == null) return;
+    switch (call.method) {
+      case "urlChanged":
+        _listener?.onUrlChanged?.call(call.arguments);
+        return;
+      case "titleChanged":
+        _listener?.onTitleChanged?.call(call.arguments);
+        return;
+      case "allCookiesVisited":
+        _listener?.onAllCookiesVisited?.call(Map.from(call.arguments));
+        return;
+      case "urlCookiesVisited":
+        _listener?.onUrlCookiesVisited?.call(Map.from(call.arguments));
+        return;
+      case 'javascriptChannelMessage':
+        _handleJavascriptChannelMessage(
+            call.arguments['channel'],
+            call.arguments['message'],
+            call.arguments['callbackId'],
+            call.arguments['frameId']);
+        break;
+      default:
+    }
+  }
+
+  setWebviewListener(WebviewEventsListener listener) {
+    _listener = listener;
+  }
+
   @override
   Future<void> dispose() async {
     await _creatingCompleter.future;
     if (!_isDisposed) {
       _isDisposed = true;
+      _javascriptChannels.clear();
       await _pluginChannel.invokeMethod('dispose', _textureId);
     }
     super.dispose();
@@ -80,14 +118,96 @@ class WebViewController extends ValueNotifier<bool> {
     return _pluginChannel.invokeMethod('goBack');
   }
 
+  Future<void> openDevTools() async {
+    if (_isDisposed) {
+      return;
+    }
+    assert(value);
+    return _pluginChannel.invokeMethod('openDevTools');
+  }
+
+  Future<void> setCookie(String domain, String key, String val) async {
+    if (_isDisposed) {
+      return;
+    }
+    assert(value);
+    return _pluginChannel.invokeMethod('setCookie', [domain, key, val]);
+  }
+
+  Future<void> deleteCookie(String domain, String key) async {
+    if (_isDisposed) {
+      return;
+    }
+    assert(value);
+    return _pluginChannel.invokeMethod('deleteCookie', [domain, key]);
+  }
+
+  Future<void> visitAllCookies() async {
+    if (_isDisposed) {
+      return;
+    }
+    assert(value);
+    return _pluginChannel.invokeMethod('visitAllCookies');
+  }
+
+  Future<void> visitUrlCookies(String domain, bool isHttpOnly) async {
+    if (_isDisposed) {
+      return;
+    }
+    assert(value);
+    return _pluginChannel.invokeMethod('visitUrlCookies', [domain, isHttpOnly]);
+  }
+
+  Future<void> setJavaScriptChannels(Set<JavascriptChannel> channels) async {
+    if (_isDisposed) {
+      return;
+    }
+    assert(value);
+    _assertJavascriptChannelNamesAreUnique(channels);
+
+    channels.forEach((channel) {
+      _javascriptChannels[channel.name] = channel;
+    });
+
+    return _pluginChannel.invokeMethod('setJavaScriptChannels',
+        [_extractJavascriptChannelNames(channels).toList()]);
+  }
+
+  Future<void> sendJavaScriptChannelCallBack(
+      bool error, String result, String callbackId, String frameId) async {
+    if (_isDisposed) {
+      return;
+    }
+    assert(value);
+    return _pluginChannel.invokeMethod(
+        'sendJavaScriptChannelCallBack', [error, result, callbackId, frameId]);
+  }
+
+  Future<void> executeJavaScript(String code) async {
+    if (_isDisposed) {
+      return;
+    }
+    assert(value);
+    return _pluginChannel.invokeMethod('executeJavaScript', [code]);
+  }
+
   /// Moves the virtual cursor to [position].
-  Future<void> _setCursorPos(Offset position) async {
+  Future<void> _cursorMove(Offset position) async {
     if (_isDisposed) {
       return;
     }
     assert(value);
     return _pluginChannel
-        .invokeMethod('setCursorPos', [position.dx, position.dy]);
+        .invokeMethod('cursorMove', [position.dx.round(), position.dy.round()]);
+  }
+
+  Future<void> _cursorDragging(Offset position) async {
+    if (_isDisposed) {
+      return;
+    }
+    assert(value);
+    return _pluginChannel.invokeMethod(
+        'cursorDragging', [position.dx.round(), position.dy.round()]);
   }
 
   Future<void> _cursorClickDown(Offset position) async {
@@ -126,6 +246,30 @@ class WebViewController extends ValueNotifier<bool> {
     assert(value);
     return _pluginChannel
         .invokeMethod('setSize', [dpi, size.width, size.height]);
+  }
+
+  Set<String> _extractJavascriptChannelNames(Set<JavascriptChannel> channels) {
+    final Set<String> channelNames =
+        channels.map((JavascriptChannel channel) => channel.name).toSet();
+    return channelNames;
+  }
+
+  void _handleJavascriptChannelMessage(final String channelName,
+      final String message, final String callbackId, final String frameId) {
+    if (_javascriptChannels.containsKey(channelName)) {
+      _javascriptChannels[channelName]!
+          .onMessageReceived(JavascriptMessage(message, callbackId, frameId));
+    } else {
+      print('Channel "$channelName" is not exstis');
+    }
+  }
+
+  void _assertJavascriptChannelNamesAreUnique(
+      final Set<JavascriptChannel>? channels) {
+    if (channels == null || channels.isEmpty) {
+      return;
+    }
+    assert(_extractJavascriptChannelNames(channels).length == channels.length);
   }
 }
 
@@ -184,45 +328,37 @@ class WebViewState extends State<WebView> {
   }
 
   Widget _buildInner() {
-    return Stack(
-      children: [
-        NotificationListener<SizeChangedLayoutNotification>(
-            onNotification: (notification) {
-              _reportSurfaceSize(context);
-              return true;
-            },
-            child: SizeChangedLayoutNotifier(
-                child: Listener(
-              onPointerHover: (ev) {},
-              onPointerDown: (ev) {
-                _controller._cursorClickDown(ev.localPosition);
-              },
-              onPointerUp: (ev) {
-                _controller._cursorClickUp(ev.localPosition);
-              },
-              onPointerMove: (ev) {
-                // _controller._setCursorPos(ev.localPosition);
-              },
-              onPointerSignal: (signal) {
-                if (signal is PointerScrollEvent) {
-                  _controller._setScrollDelta(
-                      signal.localPosition,
-                      signal.scrollDelta.dx.round(),
-                      signal.scrollDelta.dy.round());
-                }
-              },
-              onPointerPanZoomUpdate: (event) {
-                _controller._setScrollDelta(event.localPosition,
-                    event.panDelta.dx.round(), event.panDelta.dy.round());
-              },
-              child: Texture(textureId: _controller._textureId),
-            ))),
-        MaterialButton(
-          onPressed: () {},
-          child: const Text("555"),
-        ),
-      ],
-    );
+    return NotificationListener<SizeChangedLayoutNotification>(
+        onNotification: (notification) {
+          _reportSurfaceSize(context);
+          return true;
+        },
+        child: SizeChangedLayoutNotifier(
+            child: Listener(
+          onPointerHover: (ev) {
+            _controller._cursorMove(ev.localPosition);
+          },
+          onPointerDown: (ev) {
+            _controller._cursorClickDown(ev.localPosition);
+          },
+          onPointerUp: (ev) {
+            _controller._cursorClickUp(ev.localPosition);
+          },
+          onPointerMove: (ev) {
+            _controller._cursorDragging(ev.localPosition);
+          },
+          onPointerSignal: (signal) {
+            if (signal is PointerScrollEvent) {
+              _controller._setScrollDelta(signal.localPosition,
+                  signal.scrollDelta.dx.round(), signal.scrollDelta.dy.round());
+            }
+          },
+          onPointerPanZoomUpdate: (event) {
+            _controller._setScrollDelta(event.localPosition,
+                event.panDelta.dx.round(), event.panDelta.dy.round());
+          },
+          child: Texture(textureId: _controller._textureId),
+        )));
   }
 
   void _reportSurfaceSize(BuildContext context) async {
