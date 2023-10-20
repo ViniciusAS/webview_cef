@@ -63,4 +63,19 @@ class MytextInput implements TextInputClient {
     // TODO: implement updateFloatingCursor
     print(point);
   }
+  
+  @override
+  void didChangeInputControl(TextInputControl? oldControl, TextInputControl? newControl) {
+    // TODO: implement didChangeInputControl
+  }
+  
+  @override
+  void insertContent(KeyboardInsertedContent content) {
+    // TODO: implement insertContent
+  }
+  
+  @override
+  void performSelector(String selectorName) {
+    // TODO: implement performSelector
+  }
 }

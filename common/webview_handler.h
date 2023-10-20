@@ -85,13 +85,13 @@ public:
     virtual void OnPaint(CefRefPtr<CefBrowser> browser, PaintElementType type, const RectList& dirtyRects, const void* buffer, int width, int height) override;
     virtual bool GetScreenInfo(CefRefPtr<CefBrowser> browser, CefScreenInfo& screen_info) override;
     
-    virtual void OnImeCompositionRangeChanged(
-          CefRefPtr<CefBrowser> browser,
-          const CefRange& selection_range,
-                                      const CefRenderHandler::RectList& character_bounds) override;
-    virtual void OnTextSelectionChanged(CefRefPtr<CefBrowser> browser,
-                                        const CefString& selected_text,
-                                        const CefRange& selected_range) override;
+    // virtual void OnImeCompositionRangeChanged(
+    //       CefRefPtr<CefBrowser> browser,
+    //       const CefRange& selection_range,
+    //                                   const CefRenderHandler::RectList& character_bounds) override;
+    // virtual void OnTextSelectionChanged(CefRefPtr<CefBrowser> browser,
+    //                                     const CefString& selected_text,
+    //                                     const CefRange& selected_range) override;
                                         
     virtual bool StartDragging(CefRefPtr<CefBrowser> browser,
                                CefRefPtr<CefDragData> drag_data,
