@@ -87,7 +87,7 @@ void WebviewApp::OnContextInitialized() {
     CefBrowserSettings browser_settings;
     browser_settings.windowless_frame_rate = 60;
     
-    std::string url = "https://www.flutter.dev/";
+    std::string url = "https://google.com/";
     
     CefWindowInfo window_info;
     window_info.SetAsWindowless(nullptr);
@@ -176,6 +176,13 @@ void WebviewApp::OnBrowserCreated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefDi
 {
     if (!m_render_js_bridge.get())
         m_render_js_bridge.reset(new CefJSBridge);
+        
+    // browser->GetHost()->SetFocus(true);
+        // browser_view_->RequestFocus();
+        // CefRefPtr<CefBrowser> browser = browser_view_->GetBrowser();
+        // if (browser) {
+        //     browser->
+        // }
 }
 
 void WebviewApp::OnBrowserDestroyed(CefRefPtr<CefBrowser> browser)

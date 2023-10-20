@@ -28,7 +28,7 @@ class _MyAppState extends State<MyApp> {
 
   // Platform messages are asynchronous, so we initialize in an async method.
   Future<void> initPlatformState() async {
-    String url = "https://flutter.dev/";
+    String url = "https://google.com/";
     _textController.text = url;
     await _controller.initialize();
     await _controller.loadUrl(url);
@@ -147,7 +147,9 @@ class _MyAppState extends State<MyApp> {
             ],
           ),
           _controller.value
-              ? Expanded(child: WebView(_controller))
+              ? Expanded(
+                child: WebView(_controller),
+              )
               : const Text("not init"),
         ],
       )),
