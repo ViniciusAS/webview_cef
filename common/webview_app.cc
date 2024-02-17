@@ -82,18 +82,15 @@ WebviewApp::WebviewApp(CefRefPtr<WebviewHandler> handler) {
 
 void WebviewApp::OnContextInitialized() {
     CEF_REQUIRE_UI_THREAD();
-    
+
     // Specify CEF browser settings here.
     CefBrowserSettings browser_settings;
     browser_settings.windowless_frame_rate = 60;
-    
-    std::string url = "https://google.com/";
-    
     CefWindowInfo window_info;
     window_info.SetAsWindowless(0);
     
     // Create the first browser window.
-    CefBrowserHost::CreateBrowser(window_info, m_handler, url, browser_settings,
+    CefBrowserHost::CreateBrowser(window_info, m_handler, "", browser_settings,
                                   nullptr, nullptr);
 }
 
@@ -150,6 +147,11 @@ void WebviewApp::OnWebKitInitialized()
                     } catch (l) {
                         console.log('messeage send')
                     }
+                }
+
+                external.EvaluateCallback = (nReqID, result) => {
+                    native function EvaluateCallback();
+                    EvaluateCallback(nReqID, result);
                 }
 
 				external.StartRequest  = (nReqID, strCmd, strCallBack, strArgs, strLog) => {

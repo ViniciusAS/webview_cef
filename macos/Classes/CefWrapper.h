@@ -22,7 +22,7 @@ extern EventsStreamHandler *evHandler;
 @interface CefWrapper : NSObject<FlutterTexture>
 
 + (void)setMethodChannel: (FlutterMethodChannel*)channel;
-+ (FlutterResult) handleMethodCallWrapper: (FlutterMethodCall*)call;
++ (void) handleMethodCallWrapper: (FlutterMethodCall*)call result:(FlutterResult)result;
 
 @end
 

@@ -58,7 +58,7 @@ FlutterMethodChannel* f_channel;
             int len = webview_value_get_len(args);
             NSMutableArray* array = [NSMutableArray arrayWithCapacity:len];
             for(int i = 0; i < len; i++) {
-                WValue* item = webview_value_get_value(args, i);
+                WValue* item = webview_value_get_list_value(args, i);
                 [array addObject:[self encode_wvalue_to_flvalue:item]];
             }
             return array;
@@ -230,7 +230,7 @@ FlutterMethodChannel* f_channel;
     webview_cef::doMessageLoopWork();
 }
 
-+ (NSObject*) handleMethodCallWrapper: (FlutterMethodCall*)call{
++ (void) handleMethodCallWrapper: (FlutterMethodCall*)call result:(FlutterResult)result{
     std::string name = std::string([call.method cStringUsingEncoding:NSUTF8StringEncoding]);
     if(name.compare("init") == 0){
         textureId = [tr registerTexture:[CefWrapper alloc]];
@@ -285,22 +285,19 @@ FlutterMethodChannel* f_channel;
             [self processKeyboardEvent:event];
             return event;
         }];
-        return [NSNumber numberWithLong:textureId];
+        result([NSNumber numberWithLong:textureId]);
     }else{
         WValue *encodeArgs = [self encode_flvalue_to_wvalue:call.arguments];
-        WValue *responseArgs = nullptr;
-        int ret = webview_cef::HandleMethodCall(name, encodeArgs, responseArgs);
+        webview_cef::HandleMethodCall(name, encodeArgs, [=](int ret, WValue* args){
+            if(ret != 0){
+                result([self encode_wvalue_to_flvalue:args]);
+            }
+            else{
+                result(nil);
+            }
+        });
         webview_value_unref(encodeArgs);
-        if(ret != 0){
-            NSObject *result = [self encode_wvalue_to_flvalue:responseArgs];
-            webview_value_unref(responseArgs);
-            return result;
-        }
-        else{
-            webview_value_unref(responseArgs);
-        }
     }
-    return nil;
 }
 @end
 

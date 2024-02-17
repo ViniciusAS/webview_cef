@@ -9,6 +9,7 @@
 
 #include <functional>
 #include <list>
+#include <unordered_map>
 
 #include "webview_cookieVisitor.h"
 
@@ -18,12 +19,16 @@ public CefLifeSpanHandler,
 public CefLoadHandler,
 public CefRenderHandler{
 public:
+    //Paint callback
     std::function<void(const void*, int32_t width, int32_t height)> onPaintCallback;
     std::function<void(int x, int y, int w, int h)> imePositionCallback;
-    std::function<void(std::string url)> onUrlChangedCb;
-    std::function<void(std::string title)> onTitleChangedCb;
-    std::function<void(std::map<std::string, std::map<std::string, std::string>>)> onAllCookieVisitedCb;
-    std::function<void(std::map<std::string, std::map<std::string, std::string>>)> onUrlCookieVisitedCb;
+    //cef message event
+    std::function<void(std::string url)> onUrlChangedEvent;
+    std::function<void(std::string title)> onTitleChangedEvent;
+    std::function<void(int type)>onCursorChangedEvent;
+    std::function<void(std::string text)> onTooltipEvent;
+    std::function<void(int level, std::string message, std::string source, int line)>onConsoleMessageEvent;
+    //webpage message
     std::function<void(std::string, std::string, std::string, std::string)> onJavaScriptChannelMessage;
 
     explicit WebviewHandler();
@@ -55,6 +60,16 @@ public:
     virtual void OnAddressChange(CefRefPtr<CefBrowser> browser,
                                  CefRefPtr<CefFrame> frame,
                                  const CefString& url) override;
+    virtual bool OnCursorChange(CefRefPtr<CefBrowser> browser,
+                                CefCursorHandle cursor,
+                                cef_cursor_type_t type,
+                                const CefCursorInfo& custom_cursor_info) override;
+    virtual bool OnTooltip(CefRefPtr<CefBrowser> browser, CefString& text) override;
+    virtual bool OnConsoleMessage(CefRefPtr<CefBrowser> browser,
+                                  cef_log_severity_t level,
+                                  const CefString& message,
+                                  const CefString& source,
+                                  int line) override;
     
     // CefLifeSpanHandler methods:
     virtual void OnAfterCreated(CefRefPtr<CefBrowser> browser) override;
@@ -118,16 +133,14 @@ public:
     
     void setCookie(const std::string& domain, const std::string& key, const std::string& value);
     void deleteCookie(const std::string& domain, const std::string& key);
-    bool visitAllCookies();
-    bool visitUrlCookies(const std::string& domain, const bool& isHttpOnly);
+    void visitAllCookies(std::function<void(std::map<std::string, std::map<std::string, std::string>>)> callback);
+    void visitUrlCookies(const std::string& domain, const bool& isHttpOnly, std::function<void(std::map<std::string, std::map<std::string, std::string>>)> callback);
 
-    bool setJavaScriptChannels(const std::vector<std::string> channels);
-    bool sendJavaScriptChannelCallBack(const bool error, const std::string result, const std::string callbackId, const std::string frameId);
-    bool executeJavaScript(const std::string code);
+    void setJavaScriptChannels(const std::vector<std::string> channels);
+    void sendJavaScriptChannelCallBack(const bool error, const std::string result, const std::string callbackId, const std::string frameId);
+    void executeJavaScript(const std::string code, std::function<void(std::string)> callback = nullptr);
     
 private:
-    bool getCookieVisitor();
-
     uint32_t width = 1;
     uint32_t height = 1;
     float dpi = 1.0;
@@ -136,11 +149,12 @@ private:
     // List of existing browser windows. Only accessed on the CEF UI thread.
     typedef std::list<CefRefPtr<CefBrowser>> BrowserList;
     BrowserList browser_list_;
+
+    std::unordered_map<std::string, std::function<void(std::string)>> js_callbacks_;
     
     // Include the default reference counting implementation.
     IMPLEMENT_REFCOUNTING(WebviewHandler);
 
-    CefRefPtr<WebviewCookieVisitor> m_CookieVisitor;
 };
 
 #endif  // CEF_TESTS_CEFSIMPLE_SIMPLE_HANDLER_H_
