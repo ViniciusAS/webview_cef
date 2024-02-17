@@ -97,7 +97,7 @@ int GetCefKeyboardModifiers(WPARAM wparam, LPARAM lparam) {
 	return modifiers;
 }
 
-FLUTTER_PLUGIN_EXPORT void handleWndProcForCEF(unsigned int message, unsigned __int64 wParam, __int64 lParam)
+FLUTTER_PLUGIN_EXPORT void processKeyEventForCEF(unsigned int message, unsigned __int64 wParam, __int64 lParam)
 {
 	if(message == WM_USER + 1){
 		webview_cef::WebviewCefPlugin::handleMessageProc(message, wParam, lParam);
